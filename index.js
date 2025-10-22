@@ -40,6 +40,10 @@ export default class Pdf extends Component {
             PropTypes.number,
         ]).isRequired,
         page: PropTypes.number,
+        hotspots: PropTypes.string,
+        notes: PropTypes.string,
+        textNotes: PropTypes.string,
+        width: PropTypes.number,
         scale: PropTypes.number,
         minScale: PropTypes.number,
         maxScale: PropTypes.number,
@@ -58,6 +62,12 @@ export default class Pdf extends Component {
         trustAllCerts: PropTypes.bool,
         singlePage: PropTypes.bool,
         onLoadComplete: PropTypes.func,
+        onPageScrolled: PropTypes.func,
+        onPageScrolledEnd: PropTypes.func,
+        onActionEnd: PropTypes.func,
+        onNextPage: PropTypes.func,
+        onPrevPage: PropTypes.func,
+        onInitialRender: PropTypes.func,
         onPageChanged: PropTypes.func,
         onError: PropTypes.func,
         onPageSingleTap: PropTypes.func,
@@ -93,11 +103,24 @@ export default class Pdf extends Component {
         trustAllCerts: true,
         usePDFKit: true,
         singlePage: false,
+        hotspots: '',
+        notes: '',
+        textNotes: '',
         onLoadProgress: (percent) => {
         },
         onLoadComplete: (numberOfPages, path) => {
         },
-        onPageChanged: (page, numberOfPages) => {
+        onPageScrolled: (offsetX, offsetY) => {
+        },
+        onPageScrolledEnd: (offsetX, offsetY, widthPdf, heightPdf, scale) => {
+        },
+        onActionEnd: (scale, offsetX, offsetY, positionOffset, widthPdf, heightPdf) => {
+        },
+        onNextPage: () => {
+        },
+        onPrevPage: () => {
+        },
+        onInitialRender: () => {
         },
         onError: (error) => {
         },
@@ -364,25 +387,16 @@ export default class Pdf extends Component {
     }
 
     _onChange = (event) => {
-
         let message = event.nativeEvent.message.split('|');
         //__DEV__ && console.log("onChange: " + message);
         if (message.length > 0) {
-            if (message.length > 5) {
-                message[4] = message.splice(4).join('|');
-            }
             if (message[0] === 'loadComplete') {
-                let tableContents;
-                try {
-                    tableContents = message[4]&&JSON.parse(message[4]);
-                } catch(e) {
-                    tableContents = message[4];
-                }
-                this.props.onLoadComplete && this.props.onLoadComplete(Number(message[1]), this.state.path, {
-                    width: Number(message[2]),
-                    height: Number(message[3]),
-                },
-                tableContents
+                this.props.onLoadComplete && this.props.onLoadComplete(
+                    Number(message[1]), 
+                    this.state.path, {
+                        width: Number(message[2]),
+                        height: Number(message[3]),
+                    }
                 );
             } else if (message[0] === 'pageChanged') {
                 this.props.onPageChanged && this.props.onPageChanged(Number(message[1]), Number(message[2]));
@@ -394,6 +408,18 @@ export default class Pdf extends Component {
                 this.props.onScaleChanged && this.props.onScaleChanged(Number(message[1]));
             } else if (message[0] === 'linkPressed') {
                 this.props.onPressLink && this.props.onPressLink(message[1]);
+            } else if (message[0] === 'pageScrolled') {
+                this.props.onPageScrolled && this.props.onPageScrolled(message[1], message[2]);
+            } else if (message[0] === 'pageScrolledEnd') {
+                this.props.onPageScrolledEnd && this.props.onPageScrolledEnd(Number(message[1]), Number(message[2]), Number(message[3]), Number(message[4]), Number(message[5]));
+            } else if (message[0] === 'actionEnd') {
+                this.props.onActionEnd && this.props.onActionEnd(Number(message[1]), Number(message[2]), Number(message[3]), Number(message[4]), Number(message[5]), Number(message[6]));
+            } else if (message[0] === 'nextPage') {
+                this.props.onNextPage && this.props.onNextPage();
+            } else if (message[0] === 'prevPage') {
+                this.props.onPrevPage && this.props.onPrevPage();
+            } else if (message[0] === 'initialRender') {
+                this.props.onInitialRender && this.props.onInitialRender();
             }
         }
 

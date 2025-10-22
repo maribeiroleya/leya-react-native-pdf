@@ -68,6 +68,26 @@ public class PdfManager extends SimpleViewManager<PdfView> implements RNPDFPdfVi
         pdfView.setPath(path);
     }
 
+    @ReactProp(name = "hotspots")
+    public void setHotspots(PdfView pdfView, String hotspots) {
+        pdfView.setHotspotsString(hotspots);
+    }
+
+    @ReactProp(name = "notes")
+    public void setNotes(PdfView pdfView, String notes) {
+        pdfView.setNotesString(notes);
+    }
+
+    @ReactProp(name = "textNotes")
+    public void setTextNotes(PdfView pdfView, String textNotes) {
+        pdfView.setTextNotesString(textNotes);
+    }
+
+    @ReactProp(name = "width")
+    public void setWidth(PdfView pdfView, float width) {
+        pdfView.drawAll();
+    }
+
     // page start from 1
     @ReactProp(name = "page")
     public void setPage(PdfView pdfView, int page) {
@@ -96,6 +116,11 @@ public class PdfManager extends SimpleViewManager<PdfView> implements RNPDFPdfVi
 
     @Override
     public void setShowsHorizontalScrollIndicator(PdfView view, boolean value) {
+        // NOOP on Android
+    }
+
+	@Override
+    public void setShowsVerticalScrollIndicator(PdfView view, boolean value) {
         // NOOP on Android
     }
 
@@ -139,11 +164,6 @@ public class PdfManager extends SimpleViewManager<PdfView> implements RNPDFPdfVi
         pdfView.setEnablePaging(enablePaging);
     }
 
-    @Override
-    public void setEnableRTL(PdfView view, boolean value) {
-        // NOOP on Android
-    }
-
     @ReactProp(name = "fitPolicy")
     public void setFitPolicy(PdfView pdfView, int fitPolicy) {
         pdfView.setFitPolicy(fitPolicy);
@@ -152,6 +172,11 @@ public class PdfManager extends SimpleViewManager<PdfView> implements RNPDFPdfVi
     @ReactProp(name = "singlePage")
     public void setSinglePage(PdfView pdfView, boolean singlePage) {
         pdfView.setSinglePage(singlePage);
+    }
+
+    @ReactProp(name = "enableMovement")
+    public void setEnableMovement(PdfView pdfView, boolean enableMovement) {
+        pdfView.updateMovement(enableMovement);
     }
 
     // It seems funny, but this method is called through delegate on Paper, but on Fabric we need to
