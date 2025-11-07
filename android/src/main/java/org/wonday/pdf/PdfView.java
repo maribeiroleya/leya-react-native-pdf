@@ -113,6 +113,7 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
 
     public PdfView(Context context, AttributeSet set){
         super(context, set);
+        Constants.PART_SIZE = 256;
         this.scaleChange = false;
         this.alreadyDraw = false;
     }
@@ -223,19 +224,21 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
 
     @Override
     public void onPageScrolledEnd(float zoom) {
-        SizeF pageSize = getPageSize(0);
-        float width = pageSize.getWidth();
-        float height = pageSize.getHeight();
+        if(!this.scaleChange) {
+            SizeF pageSize = getPageSize(0);
+            float width = pageSize.getWidth();
+            float height = pageSize.getHeight();
 
-        WritableMap event = Arguments.createMap();
-        event.putString("message", "pageScrolledEnd|"+(this.getCurrentXOffset())+"|"+(this.getCurrentYOffset())+"|"+width+"|"+height+"|"+zoom);
+            WritableMap event = Arguments.createMap();
+            event.putString("message", "pageScrolledEnd|" + (this.getCurrentXOffset()) + "|" + (this.getCurrentYOffset()) + "|" + width + "|" + height + "|" + zoom);
 
-        ReactContext reactContext = (ReactContext)this.getContext();
-        reactContext.getJSModule(RCTEventEmitter.class).receiveEvent(
-                this.getId(),
-                "topChange",
-                event
-        );
+            ReactContext reactContext = (ReactContext) this.getContext();
+            reactContext.getJSModule(RCTEventEmitter.class).receiveEvent(
+                    this.getId(),
+                    "topChange",
+                    event
+            );
+        }
     }
 
     @Override
@@ -407,7 +410,6 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
 
 
     public void drawPdf() {
-        showLog(format("drawPdf path:%s %s", this.path, this.page));
         if(this.alreadyDraw) {
             if(this.scaleChange) {
                 this.zoomWithAnimation(this.scale);
@@ -424,6 +426,8 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
             }
         }
         else {
+
+            Log.d("DEBUG DRAW PDF", String.format("%s", this.path));
 
             if (this.path != null) {
 
@@ -452,6 +456,7 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
 
                 configurator.defaultPage(this.page - 1)
                         .swipeHorizontal(this.horizontal)
+                        .withHotspots(constructHotspots())
                         .onPageChange(this)
                         .onLoad(this)
                         .onError(this)
@@ -460,12 +465,12 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
                         .onPageSwipeChange(this)
                         .onActionEnd(this)
                         .onRender(this)
-                        .spacing(this.spacing)
+                        .spacing(0)
                         .password(this.password)
-                        .enableAntialiasing(this.enableAntialiasing)
+                        .enableAntialiasing(false)
                         .pageFitPolicy(this.fitPolicy)
                         .pageSnap(this.pageSnap)
-                        .autoSpacing(this.autoSpacing)
+                        .autoSpacing(false)
                         .pageFling(this.pageFling)
                         .enableSwipe(!this.singlePage && this.scrollEnabled)
                         .enableDoubletap(!this.singlePage && this.enableDoubleTapZoom)
