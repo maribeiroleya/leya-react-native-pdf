@@ -361,7 +361,8 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
                         object.get("borderColor").getAsString(),
                         object.get("borderSize").getAsInt(),
                         Double.valueOf(object.get("borderOpacity").getAsString()).floatValue(),
-                        lines);
+                        lines,
+                        object.get("editing").getAsBoolean());
                 textNotes.add(note);
             }
         }

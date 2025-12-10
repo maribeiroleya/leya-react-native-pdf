@@ -35,6 +35,7 @@ UIView
 @property(nonatomic, strong) NSString *path;
 @property(nonatomic) int page;
 @property(nonatomic) float scale;
+@property(nonatomic) float manualScale;
 @property(nonatomic) float minScale;
 @property(nonatomic) float maxScale;
 @property(nonatomic) BOOL horizontal;
@@ -49,6 +50,9 @@ UIView
 @property(nonatomic) int spacing;
 @property(nonatomic, strong) NSString *password;
 @property(nonatomic) BOOL singlePage;
+@property(nonatomic, strong) NSString *hotspots;
+@property(nonatomic, strong) NSString *notes;
+@property(nonatomic, strong) NSString *textNotes;
 
 @property(nonatomic, copy) RCTBubblingEventBlock onChange;
 

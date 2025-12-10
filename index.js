@@ -73,6 +73,9 @@ export default class Pdf extends Component {
         onPageSingleTap: PropTypes.func,
         onScaleChanged: PropTypes.func,
         onPressLink: PropTypes.func,
+        onHotspotPress: PropTypes.func,
+        onNotePress: PropTypes.func,
+        onNoteMoved: PropTypes.func,
 
         // Props that are not available in the earlier react native version, added to prevent crashed on android
         accessibilityLabel: PropTypes.string,
@@ -117,6 +120,12 @@ export default class Pdf extends Component {
         onActionEnd: (scale, offsetX, offsetY, positionOffset, widthPdf, heightPdf) => {
         },
         onNextPage: () => {
+        },
+        onHotspotPress: (uid) => {
+        },
+        onNotePress: (uid, x, y) => {
+        },
+        onNoteMoved: (uid, x, y, width, height) => {
         },
         onPrevPage: () => {
         },
@@ -386,6 +395,28 @@ export default class Pdf extends Component {
         
     }
 
+
+    setHotspots(hotspots) {
+        this.setNativeProps({
+            hotspots: hotspots
+        });
+    }
+
+
+    setNotes(notes) {
+        this.setNativeProps({
+            notes: notes
+        });
+    }
+
+
+    setTextNotes(notes) {
+        this.setNativeProps({
+            textNotes: notes
+        });
+    }
+
+
     _onChange = (event) => {
         let message = event.nativeEvent.message.split('|');
         //__DEV__ && console.log("onChange: " + message);
@@ -403,7 +434,7 @@ export default class Pdf extends Component {
             } else if (message[0] === 'error') {
                 this._onError(new Error(message[1]));
             } else if (message[0] === 'pageSingleTap') {
-                this.props.onPageSingleTap && this.props.onPageSingleTap(Number(message[1]), Number(message[2]), Number(message[3]));
+                this.props.onPageSingleTap && this.props.onPageSingleTap(Number(message[1]), Number(message[2]), Number(message[3]), Number(message[4]), Number(message[5]));
             } else if (message[0] === 'scaleChanged') {
                 this.props.onScaleChanged && this.props.onScaleChanged(Number(message[1]));
             } else if (message[0] === 'linkPressed') {
@@ -420,6 +451,20 @@ export default class Pdf extends Component {
                 this.props.onPrevPage && this.props.onPrevPage();
             } else if (message[0] === 'initialRender') {
                 this.props.onInitialRender && this.props.onInitialRender();
+            }
+            else if (message[0] === 'hotspotTapped') {
+                this.props.onHotspotPress && this.props.onHotspotPress(message[1]);
+            }
+            else if (message[0] === 'noteTapped') {
+                this.props.onHotspotPress && this.props.onNotePress(message[1], Number(message[2]), Number(message[3]));
+            }
+            else if (message[0] === 'noteMoved') {
+                if(message[3] !== undefined) {
+                    this.props.onNoteMoved && this.props.onNoteMoved(message[1], Number(message[2]), Number(message[3]), Number(message[4]), Number(message[5]));
+                }
+                else {
+                    this.props.onNoteMoved && this.props.onNoteMoved(message[1], Number(message[2]), Number(message[3]));
+                }
             }
         }
 
