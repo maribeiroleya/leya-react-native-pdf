@@ -261,13 +261,15 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
             originalWidth = pageWidth;
         }
 
+
+
         if (lastPageWidth>0 && lastPageHeight>0 && (pageWidth!=lastPageWidth || pageHeight!=lastPageHeight)) {
             // maybe change by other instance, restore zoom setting
             Constants.Pinch.MINIMUM_ZOOM = this.minScale;
             Constants.Pinch.MAXIMUM_ZOOM = this.maxScale;
 
             WritableMap event = Arguments.createMap();
-            event.putString("message", "scaleChanged|"+(pageWidth/originalWidth));
+            event.putString("message", "scaleChanged|"+getZoomScale());
             ReactContext reactContext = (ReactContext)this.getContext();
             reactContext.getJSModule(RCTEventEmitter.class).receiveEvent(
                     this.getId(),
