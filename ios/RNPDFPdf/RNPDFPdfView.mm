@@ -1019,6 +1019,7 @@ using namespace facebook::react;
                 }
             }
         }
+        [self notifyOnChangeWithMessage:[[NSString alloc] initWithString:[NSString stringWithFormat:@"scaleChangedEnd|%f", _scale]]];
     } else {
         // Desabilitar gestures das notas durante todo o pinch
         for (UIView *subview in _pdfView.subviews) {
@@ -1467,12 +1468,13 @@ using namespace facebook::react;
     noteView.userInteractionEnabled = YES;
     noteView.tag = 3001;
 
-    // Cor de fundo com opacidade - usando helper method para suportar hex colors
-    UIColor *backgroundUIColor = [self colorFromHexString:backgroundColorStr];
-
-    // Aplicar opacidade ao fundo (clamping entre 0.0 e 1.0)
-    CGFloat clampedBackgroundOpacity = MAX(0.0, MIN(1.0, backgroundOpacity));
-    noteView.backgroundColor = [backgroundUIColor colorWithAlphaComponent:clampedBackgroundOpacity];
+    if(![backgroundColorStr isEqual:@"transparent"]) {
+        // Cor de fundo com opacidade - usando helper method para suportar hex colors
+        UIColor *backgroundUIColor = [self colorFromHexString:backgroundColorStr];
+        // Aplicar opacidade ao fundo (clamping entre 0.0 e 1.0)
+        CGFloat clampedBackgroundOpacity = MAX(0.0, MIN(1.0, backgroundOpacity));
+        noteView.backgroundColor = [backgroundUIColor colorWithAlphaComponent:clampedBackgroundOpacity];
+    }
 
     // Configuração da borda - ajustar para o zoom atual
     CGFloat currentScale = _scale > 0 ? _scale : 1.0;

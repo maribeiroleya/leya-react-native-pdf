@@ -72,6 +72,7 @@ export default class Pdf extends Component {
         onError: PropTypes.func,
         onPageSingleTap: PropTypes.func,
         onScaleChanged: PropTypes.func,
+        onScaleChangedEnd: PropTypes.func,
         onPressLink: PropTypes.func,
         onHotspotPress: PropTypes.func,
         onNotePress: PropTypes.func,
@@ -136,6 +137,8 @@ export default class Pdf extends Component {
         onPageSingleTap: (page, x, y) => {
         },
         onScaleChanged: (scale) => {
+        },
+        onScaleChangedEnd: (scale) => {
         },
         onPressLink: (url) => {
         },
@@ -437,6 +440,8 @@ export default class Pdf extends Component {
                 this.props.onPageSingleTap && this.props.onPageSingleTap(Number(message[1]), Number(message[2]), Number(message[3]), Number(message[4]), Number(message[5]));
             } else if (message[0] === 'scaleChanged') {
                 this.props.onScaleChanged && this.props.onScaleChanged(Number(message[1]));
+            } else if (message[0] === 'scaleChangedEnd') {
+                this.props.onScaleChangedEnd && this.props.onScaleChangedEnd(Number(message[1]));
             } else if (message[0] === 'linkPressed') {
                 this.props.onPressLink && this.props.onPressLink(message[1]);
             } else if (message[0] === 'pageScrolled') {
