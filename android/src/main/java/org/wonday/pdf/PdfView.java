@@ -302,11 +302,15 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
     protected List<Hotspot> constructHotspots() {
         List<Hotspot> hotspots = new ArrayList<>();
         if (!this.hotspotsString.isEmpty()) {
-            JsonArray array = stringToArray(this.hotspotsString);
-            for (JsonElement element : array) {
-                JsonObject object = element.getAsJsonObject();
-                Hotspot hotspot = new Hotspot(Double.valueOf(object.get("xPos").getAsString()).doubleValue(), Double.valueOf(object.get("yPos").getAsString()).doubleValue(), object.get("type").getAsString());
-                hotspots.add(hotspot);
+            try {
+                JsonArray array = stringToArray(this.hotspotsString);
+                for (JsonElement element : array) {
+                    JsonObject object = element.getAsJsonObject();
+                    Hotspot hotspot = new Hotspot(Double.valueOf(object.get("xPos").getAsString()).doubleValue(), Double.valueOf(object.get("yPos").getAsString()).doubleValue(), object.get("type").getAsString());
+                    hotspots.add(hotspot);
+                }
+            } catch (Exception e) {
+
             }
         }
         return hotspots;
@@ -315,11 +319,15 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
     protected List<Note> constructNotes() {
         List<Note> notes = new ArrayList<>();
         if(!this.notesString.isEmpty()) {
-            JsonArray array = stringToArray(this.notesString);
-            for(JsonElement element : array) {
-                JsonObject object = element.getAsJsonObject();
-                Note note = new Note(Double.valueOf(object.get("xPos").getAsString()).doubleValue(), Double.valueOf(object.get("yPos").getAsString()).doubleValue(), object.get("color").getAsString());
-                notes.add(note);
+            try {
+                JsonArray array = stringToArray(this.notesString);
+                for(JsonElement element : array) {
+                    JsonObject object = element.getAsJsonObject();
+                    Note note = new Note(Double.valueOf(object.get("xPos").getAsString()).doubleValue(), Double.valueOf(object.get("yPos").getAsString()).doubleValue(), object.get("color").getAsString());
+                    notes.add(note);
+                }
+            } catch (Exception e) {
+
             }
         }
         return notes;
@@ -327,45 +335,49 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
 
 
     protected List<TextNote> constructTextNotes() {
+
         List<TextNote> textNotes = new ArrayList<>();
         if(!this.textNotesString.isEmpty()) {
-
-            JsonArray array = stringToArray(this.textNotesString);
-            for(JsonElement element : array) {
-                JsonObject object = element.getAsJsonObject();
-                List<TextLine> lines = new ArrayList<>();
-                String text = "";
-                int count = 0;
-                for(JsonElement lineElement : object.getAsJsonArray("lines")) {
-                    JsonObject objectLine = lineElement.getAsJsonObject();
-                    if(count != 0) {
-                        text += '\n';
+            try {
+                JsonArray array = stringToArray(this.textNotesString);
+                for (JsonElement element : array) {
+                    JsonObject object = element.getAsJsonObject();
+                    List<TextLine> lines = new ArrayList<>();
+                    String text = "";
+                    int count = 0;
+                    for (JsonElement lineElement : object.getAsJsonArray("lines")) {
+                        JsonObject objectLine = lineElement.getAsJsonObject();
+                        if (count != 0) {
+                            text += '\n';
+                        }
+                        text += objectLine.get("text").getAsString();
+                        count++;
                     }
-                    text += objectLine.get("text").getAsString();
-                    count++;
+                    if (!text.equals("") && object.getAsJsonArray("lines").size() > 0) {
+                        JsonObject objectLine = object.getAsJsonArray("lines").get(0).getAsJsonObject();
+                        TextLine line = new TextLine(
+                                Double.valueOf(objectLine.get("fontSize").getAsString()).doubleValue(),
+                                objectLine.get("fontColor").getAsString(),
+                                Double.valueOf(objectLine.get("fontOpacity").getAsString()).floatValue(),
+                                text);
+                        lines.add(line);
+                    }
+                    TextNote note = new TextNote(
+                            Double.valueOf(object.get("xPos").getAsString()).doubleValue(),
+                            Double.valueOf(object.get("yPos").getAsString()).doubleValue(),
+                            Double.valueOf(object.get("width").getAsString()).doubleValue(),
+                            Double.valueOf(object.get("height").getAsString()).doubleValue(),
+                            object.get("backgroundColor").getAsString(),
+                            Double.valueOf(object.get("backgroundOpacity").getAsString()).floatValue(),
+                            object.get("borderColor").getAsString(),
+                            object.get("borderSize").getAsInt(),
+                            Double.valueOf(object.get("borderOpacity").getAsString()).floatValue(),
+                            lines,
+                            object.get("editing").getAsBoolean());
+                    textNotes.add(note);
                 }
-                if(!text.equals("") && object.getAsJsonArray("lines").size() > 0) {
-                    JsonObject objectLine = object.getAsJsonArray("lines").get(0).getAsJsonObject();
-                    TextLine line = new TextLine(
-                            Double.valueOf(objectLine.get("fontSize").getAsString()).doubleValue(),
-                            objectLine.get("fontColor").getAsString(),
-                            Double.valueOf(objectLine.get("fontOpacity").getAsString()).floatValue(),
-                            text);
-                    lines.add(line);
-                }
-                TextNote note = new TextNote(
-                        Double.valueOf(object.get("xPos").getAsString()).doubleValue(),
-                        Double.valueOf(object.get("yPos").getAsString()).doubleValue(),
-                        Double.valueOf(object.get("width").getAsString()).doubleValue(),
-                        Double.valueOf(object.get("height").getAsString()).doubleValue(),
-                        object.get("backgroundColor").getAsString(),
-                        Double.valueOf(object.get("backgroundOpacity").getAsString()).floatValue(),
-                        object.get("borderColor").getAsString(),
-                        object.get("borderSize").getAsInt(),
-                        Double.valueOf(object.get("borderOpacity").getAsString()).floatValue(),
-                        lines,
-                        object.get("editing").getAsBoolean());
-                textNotes.add(note);
+            } catch (Exception e) {
+
             }
         }
         return textNotes;
@@ -373,16 +385,18 @@ public class PdfView extends PDFView implements OnPageChangeListener, OnLoadComp
 
 
     public void setHotspotsString(String hotspotsString) {
-        this.hotspotsString = hotspotsString;
+        if(!hotspotsString.equals(this.hotspotsString)) {
+            this.hotspotsString = hotspotsString;
+        }
     }
     public void setNotesString(String notesString) {
-        if(!notesString.equals(this.notesString )) {
+        if(!notesString.equals(this.notesString)) {
             this.notesString = notesString;
         }
     }
 
     public void setTextNotesString(String textNotesString) {
-        if(!textNotesString.equals(this.textNotesString )) {
+        if(!textNotesString.equals(this.textNotesString)) {
             this.textNotesString = textNotesString;
         }
     }
