@@ -9,25 +9,38 @@
   <ScrollViewer
     x:Name="PagesContainer"
     Background="#505050"
+      VerticalScrollMode="Enabled"
     HorizontalScrollMode="Enabled"
-    HorizontalScrollBarVisibility="Visible"
+    HorizontalScrollBarVisibility="Hidden"
+    VerticalScrollBarVisibility="Hidden"
     IsTabStop="True"
     IsTapEnabled="True"
     AllowFocusOnInteraction="True"
     AllowFocusWhenDisabled="True"
     UseSystemFocusVisuals="False"
     PointerWheelChanged="PagesContainer_PointerWheelChanged"
-    Tapped="PagesContainer_Tapped"
+    PointerMoved="PagesContainer_PointerMoved"
+      PointerPressed="PagesContainer_PointerPressed"
+      PointerReleased="PagesContainer_PointerReleased"
+      PointerExited="PagesContainer_PointerReleased"
+      PointerCanceled="PagesContainer_PointerReleased"
+      PointerCaptureLost="PagesContainer_PointerReleased"
+      Tapped="PagesContainer_Tapped"
     ViewChanged="PagesContainer_ViewChanged"
     >
-    <ItemsControl x:Name="Pages" HorizontalAlignment="Center"
-                  SizeChanged="Pages_SizeChanged"
-                  AllowFocusOnInteraction="False">
-      <ItemsControl.ItemsPanel>
-        <ItemsPanelTemplate>
-          <StackPanel x:Name="OrientationSelector" Orientation="Vertical"/>
-        </ItemsPanelTemplate>
-      </ItemsControl.ItemsPanel>
-    </ItemsControl>
+    <Grid x:Name="ContentGrid" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <ItemsControl x:Name="Pages"
+                    SizeChanged="Pages_SizeChanged"
+                    AllowFocusOnInteraction="False">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel x:Name="OrientationSelector" Orientation="Vertical"/>
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+      </ItemsControl>
+      <Canvas x:Name="HotspotsCanvas" IsHitTestVisible="True"/>
+      <Canvas x:Name="NotesCanvas" IsHitTestVisible="True"/>
+      <Canvas x:Name="TextNotesCanvas" IsHitTestVisible="True"/>
+    </Grid>
   </ScrollViewer>
 </UserControl>
