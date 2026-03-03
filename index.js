@@ -77,7 +77,7 @@ export default class Pdf extends Component {
         onHotspotPress: PropTypes.func,
         onNotePress: PropTypes.func,
         onNoteMoved: PropTypes.func,
-
+        onTextChange: PropTypes.func,
         // Props that are not available in the earlier react native version, added to prevent crashed on android
         accessibilityLabel: PropTypes.string,
         importantForAccessibility: PropTypes.string,
@@ -141,6 +141,8 @@ export default class Pdf extends Component {
         onScaleChangedEnd: (scale) => {
         },
         onPressLink: (url) => {
+        },
+        onTextChange: (uid, text) => {
         },
     };
 
@@ -470,6 +472,9 @@ export default class Pdf extends Component {
                 else {
                     this.props.onNoteMoved && this.props.onNoteMoved(message[1], Number(message[2]), Number(message[3]));
                 }
+            }
+            else if (message[0] === 'textNoteChanged') {
+                this.props.onTextChange && this.props.onTextChange(message[1], message[2]);
             }
         }
 

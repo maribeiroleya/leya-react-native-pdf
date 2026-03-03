@@ -81,6 +81,7 @@ const float MIN_SCALE = 1.0f;
     UISwipeGestureRecognizer *_swipeLeftRecognizer;
     UISwipeGestureRecognizer *_swipeRightRecognizer;
     NSString *_clickedTextNoteId; // ID da nota de texto clicada (tag 3000)
+    NSSet *_previousTextNoteIds; // IDs das notas de texto anteriores (para detetar novas)
 }
 
 #ifdef RCT_NEW_ARCH_ENABLED
@@ -215,8 +216,13 @@ using namespace facebook::react;
             [self drawNotes];
         }
         if (![_textNotes isEqualToString:RCTNSStringFromStringNilIfEmpty(newProps.textNotes)]) {
+            NSString *oldTextNotes = _textNotes;
             _textNotes = RCTNSStringFromStringNilIfEmpty(newProps.textNotes);
-            [self drawTextNotes];
+            // Só redesenhar se mudou alguma propriedade de estilo (cor, posição, tamanho, etc.)
+            // Se só mudou o texto (utilizador a escrever), não fazer nada — evita fechar o teclado
+            if ([self textNotesStyleChanged:oldTextNotes to:_textNotes]) {
+                [self drawTextNotes];
+            }
         }
     }
 }
@@ -756,6 +762,7 @@ using namespace facebook::react;
             _scale = _pdfView.scaleFactor/_fixScaleFactor;
             [self drawNotes];
             [self adjustTextNotesBorderWidth];
+            [self updateTextNoteTransforms];
             [self notifyOnChangeWithMessage:[[NSString alloc] initWithString:[NSString stringWithFormat:@"scaleChanged|%f", _scale]]];
         }
     }
@@ -906,10 +913,29 @@ using namespace facebook::react;
                                 textView.hidden = NO;  // MOSTRAR para edição
                                 textView.editable = YES;
                                 textView.userInteractionEnabled = YES;
+                                textView.delegate = self;
+                                textView.tintColor = [UIColor blueColor];
 
-                                // Mostrar teclado
+                                // Guardar texto actual como "original" para que textViewDidChange
+                                // dispare correctamente e o JS receba os eventos de keystroke
+                                objc_setAssociatedObject(textView, "originalText",
+                                                         [[NSAttributedString alloc] initWithString:textView.text],
+                                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+                                // Mostrar teclado e definir typingAttributes DEPOIS de becomeFirstResponder
+                                // (o iOS pode resetar typingAttributes durante becomeFirstResponder)
                                 dispatch_async(dispatch_get_main_queue(), ^{
                                     [textView becomeFirstResponder];
+                                    NSDictionary *baseDisplayAttrs = objc_getAssociatedObject(textView, "baseDisplayAttrs");
+                                    if (baseDisplayAttrs) {
+                                        CGFloat scale = self->_scale > 0 ? self->_scale : 1.0;
+                                        UIFont *baseFont = baseDisplayAttrs[NSFontAttributeName];
+                                        NSMutableDictionary *typingAttrs = [baseDisplayAttrs mutableCopy];
+                                        if (baseFont) {
+                                            typingAttrs[NSFontAttributeName] = [UIFont systemFontOfSize:baseFont.pointSize * scale];
+                                        }
+                                        textView.typingAttributes = typingAttrs;
+                                    }
                                 });
                             }
                         }
@@ -959,30 +985,13 @@ using namespace facebook::react;
                                 NSString *originalPlainText = originalText.string;
 
                                 if (![newPlainText isEqualToString:originalPlainText]) {
-                                    // Texto mudou - criar novo attributedString com estilo original
-                                    NSLog(@"📝 Texto editado - plain text: %@", newPlainText);
-
-                                    // Pegar atributos da primeira linha do texto original
-                                    NSDictionary *baseAttributes = [originalText attributesAtIndex:0 effectiveRange:NULL];
-                                    NSAttributedString *newAttributedText = [[NSAttributedString alloc] initWithString:newPlainText attributes:baseAttributes];
-
-                                    // Guardar o novo texto editado
-                                    objc_setAssociatedObject(noteView, "attributedText", newAttributedText, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-                                    // Atualizar CATextLayer
-                                    for (CALayer *sublayer in noteView.layer.sublayers) {
-                                        if ([sublayer isKindOfClass:[CATextLayer class]]) {
-                                            CATextLayer *textLayer = (CATextLayer *)sublayer;
-                                            textLayer.string = newAttributedText;
-                                            break;
-                                        }
-                                    }
-
-                                    // TODO: Notificar JavaScript sobre a mudança de texto
+                                    // Notificar React Native sobre a mudança de texto
+                                    [self notifyOnChangeWithMessage:[NSString stringWithFormat:@"textNoteChanged|%@|%@", view.accessibilityIdentifier, newPlainText]];
                                 }
 
-                                // Remover UITextView
-                                [textView removeFromSuperview];
+                                // Desativar edição (UITextView permanece visível)
+                                textView.editable = NO;
+                                textView.userInteractionEnabled = NO;
                             }
                         }
                     }
@@ -1216,11 +1225,14 @@ using namespace facebook::react;
 
 - (void)drawHotspots {
     [self removeOverlaysWithTags:@[@1000]];
+    if (!_hotspots || _hotspots.length == 0) return;
     NSError *error = nil;
     NSData *data = [_hotspots dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) return;
     NSArray *array = [NSJSONSerialization JSONObjectWithData:data
                                                 options:0
                                                   error:&error];
+    if (!array) return;
     for(NSDictionary *hotspot in array) {
         NSString *type = hotspot[@"type"] ?: @"default";
         NSString *iconName = [NSString stringWithFormat:@"classification_%@", type];
@@ -1228,38 +1240,103 @@ using namespace facebook::react;
     }
 }
 
+// Devolve YES se alguma propriedade de estilo mudou entre dois JSON de textNotes.
+// Ignora as mudanças de texto (lines[].text) — essas vêm do utilizador a escrever.
+- (BOOL)textNotesStyleChanged:(NSString *)oldJSON to:(NSString *)newJSON {
+    if (!oldJSON && !newJSON) return NO;
+    if (!oldJSON || !newJSON) return YES;
+
+    NSArray *oldArr = [NSJSONSerialization JSONObjectWithData:[oldJSON dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    NSArray *newArr = [NSJSONSerialization JSONObjectWithData:[newJSON dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+
+    if (oldArr.count != newArr.count) return YES;
+
+    NSArray *noteStyleKeys = @[@"uid", @"xPos", @"yPos", @"width", @"height",
+                               @"borderSize", @"borderColor", @"borderOpacity",
+                               @"backgroundColor", @"backgroundOpacity"];
+    NSArray *lineStyleKeys = @[@"fontSize", @"fontColor", @"fontOpacity"];
+
+    for (NSInteger i = 0; i < (NSInteger)oldArr.count; i++) {
+        NSDictionary *oldNote = oldArr[i];
+        NSDictionary *newNote = newArr[i];
+
+        for (NSString *key in noteStyleKeys) {
+            if (![oldNote[key] isEqual:newNote[key]]) return YES;
+        }
+
+        NSArray *oldLines = oldNote[@"lines"];
+        NSArray *newLines = newNote[@"lines"];
+        if (oldLines.count != newLines.count) return YES;
+        for (NSInteger j = 0; j < (NSInteger)oldLines.count; j++) {
+            for (NSString *key in lineStyleKeys) {
+                if (![oldLines[j][key] isEqual:newLines[j][key]]) return YES;
+            }
+        }
+    }
+    return NO;
+}
+
 - (void)drawTextNotes {
     [self removeOverlaysWithTags:@[@3000]];
+    if (!_textNotes || _textNotes.length == 0) return;
     NSError *error = nil;
     NSData *data = [_textNotes dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) return;
     NSArray *array = [NSJSONSerialization JSONObjectWithData:data
                                                 options:0
                                                   error:&error];
+    if (!array) return;
+
+    // Detetar nova nota (presente no novo array mas não no anterior)
+    NSString *newNoteId = nil;
+    NSMutableSet *currentIds = [NSMutableSet set];
+
     for(NSDictionary *note in array) {
+        NSString *uid = note[@"uid"];
+        if (uid) {
+            [currentIds addObject:uid];
+            if (_previousTextNoteIds && ![_previousTextNoteIds containsObject:uid]) {
+                newNoteId = uid;
+            }
+        }
         [self addTextNoteWithX:[note[@"xPos"] floatValue]
                           andY:[note[@"yPos"] floatValue]
                          width:[note[@"width"] floatValue]
                         height:[note[@"height"] floatValue]
-                  annotationId:note[@"uid"]
-                   initialText:note[@"lines"]  // Pass lines array as initialText
-                      fontSize:16  // Default font size (will be overridden by line-specific sizes)
-                     textColor:@"#000000"  // Default color (will be overridden by line-specific colors)
-                   textOpacity:1  // Default opacity (will be overridden by line-specific opacity)
+                  annotationId:uid
+                   initialText:note[@"lines"]
+                      fontSize:16
+                     textColor:@"#000000"
+                   textOpacity:1
                    borderWidth:[note[@"borderSize"] floatValue]
                    borderColor:note[@"borderColor"]
                  borderOpacity:[note[@"borderOpacity"] floatValue]
                backgroundColor:note[@"backgroundColor"]
-             backgroundOpacity:[note[@"backgroundOpacity"] floatValue]];  // Pass editing state
+             backgroundOpacity:[note[@"backgroundOpacity"] floatValue]];
+    }
+
+    _previousTextNoteIds = [currentIds copy];
+
+    // Se houver uma nova nota, entrar automaticamente em modo de edição
+    if (newNoteId) {
+        NSString *capturedNoteId = newNoteId;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self->_clickedTextNoteId = capturedNoteId;
+            [self showTextNoteEditingControlsForNoteId:capturedNoteId];
+        });
     }
 }
 
 - (void)drawNotes {
     [self removeOverlaysWithTags:@[@2000]];
+    if (!_notes || _notes.length == 0) return;
     NSError *error = nil;
     NSData *data = [_notes dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) return;
     NSArray *array = [NSJSONSerialization JSONObjectWithData:data
                                                 options:0
                                                   error:&error];
+    if (!array) return;
     for(NSDictionary *note in array) {
         [self addNoteWithX:[note[@"xPos"] floatValue]  andY:[note[@"yPos"] floatValue]  color:note[@"color"] annotationId:note[@"uid"]];
     }
@@ -1342,7 +1419,7 @@ using namespace facebook::react;
 
     // Tamanho fixo na tela - dividir pelo scaleFactor para compensar o zoom
     // Quando zoom aumenta, o tamanho em coordenadas da página diminui para manter tamanho visual constante
-    CGFloat fixedSizeOnScreen = 15 * pageBounds.size.width / originalPageBounds.size.width * [UIScreen mainScreen].scale;
+    CGFloat fixedSizeOnScreen = 25 * pageBounds.size.width / originalPageBounds.size.width;
     CGFloat noteSizeInPageCoords = fixedSizeOnScreen / _pdfView.scaleFactor;
 
     // Calcular posição do centro da nota
@@ -1485,11 +1562,14 @@ using namespace facebook::react;
     objc_setAssociatedObject(noteView, "originalBorderWidth", @(borderWidth), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     // Cor da borda - usando helper method para suportar hex colors
-    UIColor *borderUIColor = [self colorFromHexString:borderColorStr];
-
-    // Aplicar opacidade à borda (clamping entre 0.0 e 1.0)
-    CGFloat clampedBorderOpacity = MAX(0.0, MIN(1.0, borderOpacity));
-    noteView.layer.borderColor = [[borderUIColor colorWithAlphaComponent:clampedBorderOpacity] CGColor];
+    if ([borderColorStr isEqual:@"transparent"]) {
+        noteView.layer.borderColor = [UIColor clearColor].CGColor;
+    } else {
+        UIColor *borderUIColor = [self colorFromHexString:borderColorStr];
+        // Aplicar opacidade à borda (clamping entre 0.0 e 1.0)
+        CGFloat clampedBorderOpacity = MAX(0.0, MIN(1.0, borderOpacity));
+        noteView.layer.borderColor = [[borderUIColor colorWithAlphaComponent:clampedBorderOpacity] CGColor];
+    }
 
     // Build attributed string from lines array
     NSMutableAttributedString *attributedText = [[NSMutableAttributedString alloc] init];
@@ -1522,6 +1602,11 @@ using namespace facebook::react;
                 NSParagraphStyleAttributeName: paragraphStyle
             };
 
+            // Guardar atributos da última linha para usar quando o texto está vazio (nova nota)
+            if (i == initialText.count - 1) {
+                objc_setAssociatedObject(noteView, "baseNoteAttributes", attributes, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+
             NSAttributedString *lineAttrString = [[NSAttributedString alloc] initWithString:text attributes:attributes];
             [attributedText appendAttributedString:lineAttrString];
 
@@ -1552,6 +1637,7 @@ using namespace facebook::react;
 
         NSString *fallbackText = @"";
         attributedText = [[NSMutableAttributedString alloc] initWithString:fallbackText attributes:attributes];
+        objc_setAssociatedObject(noteView, "baseNoteAttributes", attributes, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 
     // Padding consistente em todos os lados - usa borderWidth ajustado ao zoom
@@ -1560,20 +1646,56 @@ using namespace facebook::react;
                                   noteView.bounds.size.width - (textPadding * 2),
                                   noteView.bounds.size.height - (textPadding * 2));
 
-    CATextLayer *textLayer = [CATextLayer layer];
-    textLayer.frame = textFrame;
-    textLayer.contentsScale = [UIScreen mainScreen].scale * 5;
+    // UITextView permanente (substitui CATextLayer) — não editável até o utilizador tocar
+    NSDictionary *baseAttrs = objc_getAssociatedObject(noteView, "baseNoteAttributes") ?: @{};
+    NSMutableParagraphStyle *displayParaStyle = [[NSMutableParagraphStyle alloc] init];
+    displayParaStyle.lineHeightMultiple = 0.9;
+    //displayParaStyle.lineSpacing = 3.0;
+    displayParaStyle.lineBreakMode = NSLineBreakByWordWrapping;
 
-    // Configurar o attributed string no CATextLayer
-    textLayer.string = attributedText;
-    textLayer.wrapped = YES;
-    textLayer.truncationMode = kCATruncationNone;
-    textLayer.alignmentMode = kCAAlignmentLeft;
+    // Atributos base (zoom=1) guardados para reconstruir o texto em qualquer zoom
+    UIFont *baseFont = baseAttrs[NSFontAttributeName] ?: [UIFont systemFontOfSize:14];
+    UIColor *baseColor = baseAttrs[NSForegroundColorAttributeName] ?: [UIColor blackColor];
+    NSDictionary *baseDisplayAttrs = @{
+        NSFontAttributeName: baseFont,
+        NSForegroundColorAttributeName: baseColor,
+        NSParagraphStyleAttributeName: displayParaStyle
+    };
 
-    // Guardar o attributed text para poder redesenhar durante resize
-    objc_setAssociatedObject(noteView, "attributedText", attributedText, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // Escala actual para renderizar o texto com a resolução correcta (currentScale já definida acima)
+    NSDictionary *scaledDisplayAttrs = @{
+        NSFontAttributeName: [UIFont systemFontOfSize:baseFont.pointSize * currentScale],
+        NSForegroundColorAttributeName: baseColor,
+        NSParagraphStyleAttributeName: displayParaStyle
+    };
+    NSAttributedString *scaledDisplayText = [[NSAttributedString alloc] initWithString:attributedText.string
+                                                                            attributes:scaledDisplayAttrs];
 
-    [noteView.layer addSublayer:textLayer];
+    UITextView *noteTextView = [[UITextView alloc] init];
+    noteTextView.backgroundColor = [UIColor clearColor];
+    noteTextView.textAlignment = NSTextAlignmentLeft;
+    noteTextView.textContainerInset = UIEdgeInsetsZero;
+    noteTextView.textContainer.lineFragmentPadding = 0;
+    noteTextView.scrollEnabled = NO;
+    noteTextView.editable = NO;
+    noteTextView.userInteractionEnabled = NO;
+    noteTextView.tag = 3002;
+    noteTextView.autoresizingMask = UIViewAutoresizingNone;
+
+    // Guardar atributos base e frame base para actualizações de escala
+    objc_setAssociatedObject(noteTextView, "baseDisplayAttrs", baseDisplayAttrs, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(noteTextView, "baseFrameValue", [NSValue valueWithCGRect:textFrame], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    // Contra-transform para evitar pixelação no zoom:
+    // bounds = tamanhoBase × scale  → renderiza com resolução correcta
+    // transform = Scale(1/scale)    → cancela o zoom do PDFKit
+    // Resultado: aparece ao tamanho correcto no ecrã, mas renderizado a resolução total
+    noteTextView.bounds = CGRectMake(0, 0, textFrame.size.width * currentScale, textFrame.size.height * currentScale);
+    noteTextView.center = CGPointMake(CGRectGetMidX(textFrame), CGRectGetMidY(textFrame));
+    noteTextView.transform = CGAffineTransformMakeScale(1.0 / currentScale, 1.0 / currentScale);
+    noteTextView.attributedText = scaledDisplayText;
+
+    [noteView addSubview:noteTextView];
 
     [container addSubview:noteView];
 
@@ -1882,65 +2004,20 @@ using namespace facebook::react;
         UIView *actualNoteView = [container viewWithTag:3001];
         if (!actualNoteView) return;
 
-        // Verificar se já existe UITextView
+        // UITextView já existe sempre (criado em addTextNoteWithX) — apenas ativar edição
         UITextView *textView = [actualNoteView viewWithTag:3002];
+        if (textView) {
+            // Guardar texto atual como original para detetar alterações no resign
+            NSAttributedString *currentAttrs = [[NSAttributedString alloc] initWithString:textView.text
+                                                                               attributes:textView.typingAttributes ?: @{}];
+            objc_setAssociatedObject(textView, "originalText",
+                                     [[NSAttributedString alloc] initWithString:textView.text],
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-        if (!textView) {
-            // Criar UITextView para edição
-            CGFloat textPadding = actualNoteView.layer.borderWidth + 2;
-            CGRect textFrame = CGRectMake(textPadding, textPadding,
-                                         actualNoteView.bounds.size.width - (textPadding * 2),
-                                         actualNoteView.bounds.size.height - (textPadding * 2));
-
-            textView = [[UITextView alloc] initWithFrame:textFrame];
-            textView.backgroundColor = [UIColor clearColor];
-            textView.tintColor = [UIColor blueColor];
-            textView.textAlignment = NSTextAlignmentLeft;
-            textView.textContainerInset = UIEdgeInsetsZero;
-            textView.textContainer.lineFragmentPadding = 0;
-            textView.scrollEnabled = NO;
-            textView.tag = 3002;
-            textView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             textView.delegate = self;
-
-            // Obter o attributedText guardado e guardar separadamente (para restaurar depois)
-            NSAttributedString *storedText = objc_getAssociatedObject(actualNoteView, "attributedText");
-            if (storedText) {
-                // Guardar o texto original (não transparente) num local separado
-                objc_setAssociatedObject(textView, "originalText", storedText, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-                // Criar versão transparente para a UITextView
-                NSMutableAttributedString *transparentText = [[NSMutableAttributedString alloc] initWithAttributedString:storedText];
-                [transparentText addAttribute:NSForegroundColorAttributeName
-                                        value:[UIColor clearColor]
-                                        range:NSMakeRange(0, transparentText.length)];
-                textView.attributedText = transparentText;
-
-                // Configurar typing attributes para novo texto ser transparente
-                textView.typingAttributes = @{
-                    NSForegroundColorAttributeName: [UIColor clearColor],
-                    NSFontAttributeName: [UIFont systemFontOfSize:14]
-                };
-            }
-
-            [actualNoteView addSubview:textView];
-        } else {
-            // Se já existe, atualizar com texto transparente
-            NSAttributedString *storedText = objc_getAssociatedObject(actualNoteView, "attributedText");
-            if (storedText) {
-                objc_setAssociatedObject(textView, "originalText", storedText, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-                NSMutableAttributedString *transparentText = [[NSMutableAttributedString alloc] initWithAttributedString:storedText];
-                [transparentText addAttribute:NSForegroundColorAttributeName
-                                        value:[UIColor clearColor]
-                                        range:NSMakeRange(0, transparentText.length)];
-                textView.attributedText = transparentText;
-
-                textView.typingAttributes = @{
-                    NSForegroundColorAttributeName: [UIColor clearColor],
-                    NSFontAttributeName: [UIFont systemFontOfSize:14]
-                };
-            }
+            textView.tintColor = [UIColor blueColor];
+            textView.editable = YES;
+            textView.userInteractionEnabled = YES;
         }
 
         // Mostrar e ativar UITextView para edição
@@ -2166,17 +2243,6 @@ using namespace facebook::react;
     UIView *selectionBorder = [container viewWithTag:4007];
     UIView *sideView = [container viewWithTag:4006];
 
-    // Encontrar CATextLayer (primeira sublayer do noteView)
-    CATextLayer *textLayer = nil;
-    if (noteView.layer.sublayers.count > 0) {
-        for (CALayer *sublayer in noteView.layer.sublayers) {
-            if ([sublayer isKindOfClass:[CATextLayer class]]) {
-                textLayer = (CATextLayer *)sublayer;
-                break;
-            }
-        }
-    }
-
     if (!noteView) return;
 
     // Constantes
@@ -2205,27 +2271,14 @@ using namespace facebook::react;
                 // Texto mudou - criar novo attributedString com estilo original
                 NSLog(@"📝 Texto editado durante resize - plain text: %@", newPlainText);
 
-                // Pegar atributos da primeira linha do texto original
-                NSDictionary *baseAttributes = [originalText attributesAtIndex:0 effectiveRange:NULL];
-                NSAttributedString *newAttributedText = [[NSAttributedString alloc] initWithString:newPlainText attributes:baseAttributes];
-
-                // Guardar o novo texto editado
-                objc_setAssociatedObject(noteView, "attributedText", newAttributedText, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-                // Atualizar CATextLayer
-                for (CALayer *sublayer in noteView.layer.sublayers) {
-                    if ([sublayer isKindOfClass:[CATextLayer class]]) {
-                        CATextLayer *textLayer = (CATextLayer *)sublayer;
-                        textLayer.string = newAttributedText;
-                        break;
-                    }
-                }
-
-                // TODO: Notificar JavaScript sobre a mudança de texto
+                // Notificar React Native sobre a mudança de texto
+                [self notifyOnChangeWithMessage:[NSString stringWithFormat:@"textNoteChanged|%@|%@",
+                    noteView.superview.accessibilityIdentifier, newPlainText]];
             }
 
-            // Remover UITextView
-            [textView removeFromSuperview];
+            // Desativar edição (UITextView permanece visível)
+            textView.editable = NO;
+            textView.userInteractionEnabled = NO;
         }
 
         // Desabilitar pan gesture do container (arrastar nota)
@@ -2394,23 +2447,21 @@ using namespace facebook::react;
         [recognizer setTranslation:CGPointZero inView:container];
         
         
-        // Atualizar textLayer quando o resize terminar (sem animação)
+        // Atualizar UITextView com nova dimensão, mantendo contra-transform anti-pixelação
         CGFloat textPadding = noteView.layer.borderWidth + 2;
         CGRect finalTextFrame = CGRectMake(textPadding, textPadding,
                                           noteView.frame.size.width - (textPadding * 2),
                                           noteView.frame.size.height - (textPadding * 2));
 
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-
-        for (CALayer *sublayer in noteView.layer.sublayers) {
-            if ([sublayer isKindOfClass:[CATextLayer class]]) {
-                sublayer.frame = finalTextFrame;
-                break;
-            }
+        UITextView *resizeTextView = [noteView viewWithTag:3002];
+        if (resizeTextView) {
+            CGFloat scale = _scale > 0 ? _scale : 1.0;
+            objc_setAssociatedObject(resizeTextView, "baseFrameValue", [NSValue valueWithCGRect:finalTextFrame], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            resizeTextView.transform = CGAffineTransformIdentity;
+            resizeTextView.bounds = CGRectMake(0, 0, finalTextFrame.size.width * scale, finalTextFrame.size.height * scale);
+            resizeTextView.center = CGPointMake(CGRectGetMidX(finalTextFrame), CGRectGetMidY(finalTextFrame));
+            resizeTextView.transform = CGAffineTransformMakeScale(1.0 / scale, 1.0 / scale);
         }
-
-        [CATransaction commit];
 
     } else if (recognizer.state == UIGestureRecognizerStateEnded || recognizer.state == UIGestureRecognizerStateCancelled) {
         // Reabilitar pan gesture do container (arrastar nota)
@@ -2515,18 +2566,14 @@ using namespace facebook::react;
                                                                 noteView.bounds.size.width - (textPadding * 2),
                                                                 noteView.bounds.size.height - (textPadding * 2));
 
-                                // Atualizar CATextLayer
-                                for (CALayer *sublayer in noteView.layer.sublayers) {
-                                    if ([sublayer isKindOfClass:[CATextLayer class]]) {
-                                        sublayer.frame = newTextFrame;
-                                        break;
-                                    }
-                                }
-
-                                // Atualizar UITextView se existir
+                                // Atualizar UITextView com contra-transform anti-pixelação
                                 UITextView *textView = [noteView viewWithTag:3002];
                                 if (textView) {
-                                    textView.frame = newTextFrame;
+                                    objc_setAssociatedObject(textView, "baseFrameValue", [NSValue valueWithCGRect:newTextFrame], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                                    textView.transform = CGAffineTransformIdentity;
+                                    textView.bounds = CGRectMake(0, 0, newTextFrame.size.width * currentScale, newTextFrame.size.height * currentScale);
+                                    textView.center = CGPointMake(CGRectGetMidX(newTextFrame), CGRectGetMidY(newTextFrame));
+                                    textView.transform = CGAffineTransformMakeScale(1.0 / currentScale, 1.0 / currentScale);
                                 }
                             }
                         }
@@ -2537,10 +2584,61 @@ using namespace facebook::react;
     }
 }
 
+// Actualiza os UITextViews de notas de texto para evitar pixelação no zoom.
+// Em vez de deixar o PDFKit escalar o UITextView como bitmap, aplicamos o contra-transform:
+//   bounds = tamanhoBase × scale  → renderiza a resolução correcta
+//   transform = Scale(1/scale)    → cancela o zoom do PDFKit
+//   font = fontBase × scale       → texto aparece ao tamanho certo
+- (void)updateTextNoteTransforms {
+    CGFloat scale = _scale > 0 ? _scale : 1.0;
+
+    for (UIView *subview in _pdfView.subviews) {
+        if (![subview isKindOfClass:[UIScrollView class]]) continue;
+        UIScrollView *scrollView = (UIScrollView *)subview;
+        for (UIView *pageView in scrollView.subviews) {
+            for (UIView *container in pageView.subviews) {
+                if (container.tag != 3000) continue;
+                UIView *noteView = [container viewWithTag:3001];
+                if (!noteView) continue;
+                UITextView *textView = (UITextView *)[noteView viewWithTag:3002];
+                if (!textView) continue;
+
+                // Não actualizar enquanto o utilizador está a editar
+                if (textView.isFirstResponder) continue;
+
+                NSValue *baseFrameValue = objc_getAssociatedObject(textView, "baseFrameValue");
+                if (!baseFrameValue) continue;
+                CGRect baseFrame = [baseFrameValue CGRectValue];
+
+                // Reconstruir texto com fonte escalada (usando atributos base do zoom=1)
+                NSDictionary *baseDisplayAttrs = objc_getAssociatedObject(textView, "baseDisplayAttrs");
+                if (baseDisplayAttrs) {
+                    UIFont *baseFont = baseDisplayAttrs[NSFontAttributeName];
+                    if (baseFont) {
+                        NSDictionary *scaledAttrs = @{
+                            NSFontAttributeName: [UIFont systemFontOfSize:baseFont.pointSize * scale],
+                            NSForegroundColorAttributeName: baseDisplayAttrs[NSForegroundColorAttributeName] ?: [UIColor blackColor],
+                            NSParagraphStyleAttributeName: baseDisplayAttrs[NSParagraphStyleAttributeName] ?: [NSParagraphStyle defaultParagraphStyle]
+                        };
+                        textView.attributedText = [[NSAttributedString alloc] initWithString:textView.text
+                                                                                  attributes:scaledAttrs];
+                    }
+                }
+
+                // Aplicar counter-transform: render a resolução scale×, aparece ao tamanho correcto
+                textView.transform = CGAffineTransformIdentity;
+                textView.bounds = CGRectMake(0, 0, baseFrame.size.width * scale, baseFrame.size.height * scale);
+                textView.center = CGPointMake(CGRectGetMidX(baseFrame), CGRectGetMidY(baseFrame));
+                textView.transform = CGAffineTransformMakeScale(1.0 / scale, 1.0 / scale);
+            }
+        }
+    }
+}
+
 #pragma mark - UITextViewDelegate
 
 - (void)textViewDidChange:(UITextView *)textView {
-    // Atualizar CATextLayer em tempo real enquanto edita
+    // Notificar React Native em tempo real enquanto edita
     if (textView.tag != 3002) return;
 
     // Encontrar o noteView pai
@@ -2555,42 +2653,15 @@ using namespace facebook::react;
     NSString *newPlainText = textView.text;
 
     // Pegar os atributos da primeira linha do texto original (mantém fonte, cor, opacidade)
-    NSDictionary *baseAttributes = [originalText attributesAtIndex:0 effectiveRange:NULL];
+    // Guardar contra originalText vazio para evitar crash "Out of bounds"
+    NSDictionary *baseAttributes = originalText.length > 0
+        ? [originalText attributesAtIndex:0 effectiveRange:NULL]
+        : (NSDictionary *)objc_getAssociatedObject(noteView, "baseNoteAttributes") ?: @{};
     NSMutableDictionary *attributes = [baseAttributes mutableCopy];
 
-    // Garantir que mantém a cor original (não transparente) para o CATextLayer
-    // Os atributos já incluem NSForegroundColorAttributeName com cor e opacidade originais
-    // Apenas garantir que existe
-    if (!attributes[NSForegroundColorAttributeName]) {
-        // Fallback se não existir cor
-        attributes[NSForegroundColorAttributeName] = [UIColor blackColor];
-    }
-
-    NSAttributedString *newAttributedText = [[NSAttributedString alloc] initWithString:newPlainText attributes:attributes];
-
-    // Atualizar CATextLayer
-    for (CALayer *sublayer in noteView.layer.sublayers) {
-        if ([sublayer isKindOfClass:[CATextLayer class]]) {
-            CATextLayer *textLayer = (CATextLayer *)sublayer;
-            textLayer.string = newAttributedText;
-            break;
-        }
-    }
-
-    // Manter o texto da UITextView transparente
-    NSMutableAttributedString *transparentText = [[NSMutableAttributedString alloc] initWithString:newPlainText attributes:attributes];
-    [transparentText addAttribute:NSForegroundColorAttributeName
-                            value:[UIColor clearColor]
-                            range:NSMakeRange(0, transparentText.length)];
-
-    // Guardar a posição do cursor
-    NSRange selectedRange = textView.selectedRange;
-
-    // Atualizar UITextView com texto transparente
-    textView.attributedText = transparentText;
-
-    // Restaurar posição do cursor
-    textView.selectedRange = selectedRange;
+    // Notificar React Native sobre a mudança de texto
+    NSString *noteId = noteView.superview.accessibilityIdentifier;
+    [self notifyOnChangeWithMessage:[NSString stringWithFormat:@"textNoteChanged|%@|%@", noteId, newPlainText]];
 }
 
 @end
